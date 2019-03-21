@@ -10,6 +10,16 @@ def cos(x):
 def sin(x):
     return numpy.sin(x)
 
+def getTimes(df):
+    time = 0
+    timeIntervals = []
+    times = []
+    for index, row in df.iterrows():
+        times.append(time)
+        timeIntervals.append(row['dt'])
+        time += row['dt']
+    return times, timeIntervals
+
 
 def transformAngles(x, y, z, yaw, roll, pitch, inverse):
     """Transform the angular vector to the drones reference frame and back to the inertial reference frame."""
@@ -186,5 +196,7 @@ def filterold(i, gradient, cutoff):
         return numpy.tanh(-gradient * (i + cutoff))
 
 
-# print transformAngles(0.1, 0, 0, -0.244, 0, 0, True)
+
+
+# print transformAngles(0, 1, 0, 3 * numpy.pi/2, 0, 0, True)
 # print transformAngles(0.1, 0, 0, 0.244, 0, 0, False)

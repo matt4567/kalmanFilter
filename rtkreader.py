@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import time
 
 # fileName = raw_input("Which file would you like to read?  ")
-fileName = "rtkData.csv"
+fileName = "rtkDataOrientationTestOutdoors.csv"
 file = open(fileName)
 
 north = []
@@ -69,7 +69,9 @@ plt.ylabel("Relative northern motion/m")
 # 	plt.show()
 #
 # rtk new antennas noise - [187:2524]
+# it was on this for rtkData - east[2630:], north[2630:]
 print len(east)
-plt.plot(east[2630:], north[2630:], 'o', ms =1,  label = "positions")
+start = 2215
+plt.plot(east[start:], north[start:], 'o', ms =1,  label = "positions")
 plt.show()
  

@@ -10,20 +10,34 @@ import csv
 import math
 import pandas as pd
 import time
+import helper
 
 # pump up the frequency
 
 
 class KalmanFilter:
-    def __init__(self, timesteps, gradient, cutoff, accNoise, rtkNoise):
-        self.simMode = True
+    def __init__(self, timesteps, gradient, cutoff, accNoise, rtkNoise, errAngle, errAngleRate, errRTK, errAcc):
+        self.simMode = False
         # feed in 3d simulation data/
         if (self.simMode):
             # data = genData2d(timesteps)
-            data = genRandomFlightData(timesteps, gradient, cutoff)
+            # data = genRandomFlightData(timesteps, gradient, cutoff, rtkNoise)
+
+            # file = open('dataRotatingArmSim.csv')
+            file = open('groundData.csv')
+            df = pd.DataFrame.from_csv(file, index_col=0)
+            # print df.head()
+            # using groundData
+            times, timeIntervals = helper.getTimes(df)
+            self.times = timeIntervals
+            # using circleSim
+            # times = numpy.arange(0, 100, 0.0065)
+            # self.times = [0.0065] * len(times)
+            data = circleSim(times)
+            # self.times = timeIntervals
             # print numpy.shape(data[0])
             self.z = data[0]
-            # print self.z
+            # print self.z[:5]
             self.positions_X = data[1]
             self.positions_Y = data[2]
             self.positions_Z = data[3]
@@ -31,16 +45,19 @@ class KalmanFilter:
 
             # Initial Conditions
             # same timestep as defined in dataGenerator.
-            self.t = timesteps
+            self.t = 0
 
         # feed in actual data
         else:
             file = open('groundData.csv')
-            df = pd.DataFrame.from_csv(file, index_col = None)
+            # file = open('dataRotatingArmSim.csv')
+            df = pd.DataFrame.from_csv(file, index_col=0)
+            # print df.head()
             # df = pd.DataFrame.from_csv(file)
-            self.z = df.values.tolist()
-            print self.z[:2]
-            self.t = self.z[1][-1]
+            self.z = df.values.tolist()[:]
+
+            # print self.z[:5]
+            self.t = self.z[0][-1]
             # print self.t
 
 
@@ -49,6 +66,7 @@ class KalmanFilter:
         # keep track of all predictedPositions
         self.predictedX = []
         self.covariances = []
+        self.predictedYaw = []
 
 
         # Process / Estimation Errors
@@ -73,8 +91,8 @@ class KalmanFilter:
         self.error_est_a_z = errorAcc
 
         # angle errors.
-        angleError = .0001
-        angleDot = .0001
+        angleError = errAngle
+        angleDot = errAngleRate
         self.error_est_angle = angleError
         self.error_est_angle_dot = angleDot
         self.error_est_roll = angleError
@@ -82,13 +100,17 @@ class KalmanFilter:
         self.error_est_pitch = angleError
         self.error_est_pitch_dot = angleDot
 
-        self.sigma_a = .01
+        self.sigma_a = 0.1
 
         if self.simMode == False:
-            noisePos = 0.005
-            noiseAcc = 0.8
+            noisePos = errRTK
+            noiseAcc = errAcc
+            # noisePos = 0.0001
+            # noiseAcc = 1
 
-        else: noisePos = noiseAcc = 0.001
+        else:
+            noisePos = 0.0001
+            noiseAcc = 1
 
         # Noise values
         # dummy values, find better vals.
@@ -128,9 +150,10 @@ class KalmanFilter:
         return X
 
 
-    def predictAngle(self, W):
+    def predictAngle(self, W, t):
         # todo - add time as in input here!
         """Predict angle from taylor expansion to 1st order as integral approximation."""
+        self.B = self.createB(t)
         W = self.B.dot(W)
         return W
 
@@ -169,6 +192,16 @@ class KalmanFilter:
                             [0, 0, 0, 0, 0, 0, 0, 1, 0],
                             [0, 0, 0, 0, 0, 0, 0, 0, 1]])
 
+    def createB(self, t):
+
+        return numpy.array([[1, t, 0, 0, 0, 0],
+                              [0, 1, 0, 0, 0, 0],
+                              [0, 0, 1, t, 0, 0],
+                              [0, 0, 0, 1, 0, 0],
+                              [0, 0, 0, 0, 1, t],
+                              [0, 0, 0, 0, 0, 1]])
+
+
 
     def preSimulationSetup(self):
         # Initial Estimation Covariance Matrix - 2d case
@@ -181,12 +214,7 @@ class KalmanFilter:
         # A and B matrices used to take state matrix to the next timestep.
         self.A = self.createA(self.t)
 
-        self.B = numpy.array([[1, self.t, 0, 0, 0, 0],
-                         [0, 1, 0, 0, 0, 0],
-                         [0, 0, 1, self.t, 0, 0],
-                         [0, 0, 0, 1, 0, 0],
-                         [0, 0, 0, 0, 1, self.t],
-                         [0, 0, 0, 0, 0, 1]])
+        self.B = self.createB(self.t)
 
         # initial state vectors
         # x looks like [x, y, z, xdot, ydot, zdot, xddot, yddot, zddot]
@@ -204,7 +232,7 @@ class KalmanFilter:
                                                    self.z[0][10], True)
 
         if self.simMode == False:
-            self.X = numpy.array([xStart, yStart, zStart, 0, 0, 0, x_init, y_init, z_init])
+            self.X = numpy.array([xStart, yStart, zStart, 1.05, 0, 0, x_init, y_init, z_init])
         else:
             self.X = numpy.array([self.z[0][0], self.z[0][1], self.z[0][2], 0, 0, 0, x_init, y_init, z_init])
         self.W = numpy.array([self.z[0][6], self.z[0][7], self.z[0][8], self.z[0][9], self.z[0][10], self.z[0][11]])
@@ -232,11 +260,15 @@ class KalmanFilter:
     def runSimulation(self):
         # counter = 0
         # Loop through data and do kalman filter iteration for each data point.
-        for data in self.z[1:]:
+        for n, data in enumerate(self.z[1:]):
+            if self.simMode:
+                self.t = self.times[n]
+
             # if data[0] == 0: continue
             # Choose correct H matrix used for converting input data into same shape as state matrix.
             if not self.simMode:
                 self.t = data[-1]
+                # print self.t
                 # self.t = 0.01
                 # if data[0] == 0: continue
             # set to first index so x_pos can be 0 everywhere
@@ -274,8 +306,13 @@ class KalmanFilter:
                                    [0, 0, 0, 0, 1, 0],
                                    [0, 0, 0, 0, 0, 1]]
 
+
+
             # 	Predict angle
-            self.W = self.predictAngle(self.W)
+            self.W = self.predictAngle(self.W, self.t)
+            self.W[0] = self.W[0] % (2 * numpy.pi)
+            self.W[2] = self.W[2] % (2 * numpy.pi)
+            self.W[4] = self.W[4] % (2 * numpy.pi)
 
             # todo - split this up into two matrixes that can be dotted together if poss. Final result will be this though.
             # todo - use indexes instead of whole matrix
@@ -301,10 +338,17 @@ class KalmanFilter:
             self.W = self.W + K.dot(Y)
             # Update covariance matrix.
             self.P_angle = (self.K_angle_identity - K.dot(self.H_angle)).dot(self.P_angle)
+
+
+
             # Obtain current angles.
             yaw = self.W[0]
             roll = self.W[2]
             pitch = self.W[4]
+
+
+
+            self.predictedYaw.append(yaw)
 
             # if counter < 10:
             #     print yaw, roll, pitch
@@ -412,13 +456,15 @@ class KalmanFilter:
         # # length = 6500
         #
         # # print the results.
-        plt.errorbar(predictedPositionsX[:], predictedPositionsY[:], xError[:], yError[:], label="Kalman")
-        # plt.plot(predictedPositionsX, predictedPositionsY, label="Predicted motion")
+        # plt.errorbar(predictedPositionsX[:], predictedPositionsY[:], xError[:], yError[:], label="Kalman")
+        plt.plot(predictedPositionsX, predictedPositionsY, label="Predicted motion")
         plt.plot(self.positions_X, self.positions_Y, label="Actual motion")
         plt.legend()
         plt.title("Section of random walk simulation shown in 2d with error bars")
         plt.xlabel("X relative position/m")
         plt.ylabel("Y relative position/m")
+        plt.show()
+        plt.plot(self.predictedYaw)
         plt.show()
 
     def getPredictions(self):
@@ -444,23 +490,24 @@ class KalmanFilter:
 
 
         for i in self.z:
-            if i[0] != 0:
-                rtkX.append(i[0])
+            # if i[0] != 0:
+            #     rtkX.append(i[0])
             if i[1] != 0:
+                rtkX.append(i[0])
                 rtkY.append(i[1])
 
         xActual = numpy.mean(rtkX)
 
         xPredActual = numpy.mean(self.predictedPositionsX)
 
-        print len(self.predictedPositionsX)
-        rtkDetlas = [abs(i - xActual) for i in rtkX]
-        print "mean of rtk deltas: ", numpy.mean(rtkDetlas)
-        print max(self.predictedPositionsX[200:]) - min(self.predictedPositionsX[200:])
-        print "std of rtk deltas: ", numpy.std(rtkDetlas)
-        deltas = [abs(i - xPredActual) for i in self.predictedPositionsX]
-        print "mean of deltas: ", numpy.mean(deltas)
-        print "std of deltas: ", numpy.std(deltas)
+        # print len(self.predictedPositionsX)
+        # rtkDetlas = [abs(i - xActual) for i in rtkX]
+        # print "mean of rtk deltas: ", numpy.mean(rtkDetlas)
+        # print max(self.predictedPositionsX[200:]) - min(self.predictedPositionsX[200:])
+        # print "std of rtk deltas: ", numpy.std(rtkDetlas)
+        # deltas = [abs(i - xPredActual) for i in self.predictedPositionsX]
+        # print "mean of deltas: ", numpy.mean(deltas)
+        # print "std of deltas: ", numpy.std(deltas)
 
         # rtkX = [0 for i in range(len(rtkY))]
         # print "mean X is", numpy.mean(rtkX)
@@ -469,7 +516,7 @@ class KalmanFilter:
         # plt.errorbar(self.predictedPositionsX, self.predictedPositionsY, xErrors, yErrors, label="kalman predictsion")
         plt.plot(self.predictedPositionsX[:], self.predictedPositionsY[:], label="Kalman predictions")
         plt.plot(rtkX[:], rtkY[:], 'o', ms=1, label="RTK")
-        plt.xlim(-4, -3)
+        # plt.xlim(-2, -1)
         # def equation(x):
         #     return [3.8 * i + 11.8 for i in x]
         # # plt.plot(rtkX, equation(rtkX), label="equation")
@@ -489,6 +536,17 @@ class KalmanFilter:
         # plt.plot(func(times, *popt))
         # plt.show()
 
+
+    def getAccuracy(self):
+        self.predictedPositionsX = [x[0] for x in self.predictedX]
+        self.predictedPositionsY = [x[1] for x in self.predictedX]
+
+        deltas = []
+        for i, val in enumerate(self.predictedPositionsX):
+            delta = abs(numpy.sqrt((val+3.45)**2 + (self.predictedPositionsY[i]-2.41)**2) - 0.35)
+            deltas.append(delta)
+        # deltas = [abs(numpy.sqrt(x**2 + y**2)) - 0.275 for x in self.predictedPositionsX for y in self.predictedPositionsY]
+        return numpy.mean(deltas)
 
 
     def findDifferencesRealData(self):
@@ -512,7 +570,7 @@ class KalmanFilter:
         yAccs = []
         timesAccs = []
         trueYs = []
-        print len(self.z), len(self.predictedPositionsX)
+        # print len(self.z), len(self.predictedPositionsX)
         for i, val in enumerate(self.z[1:]):
             time += val[-1]
             trueY = func(time, *popt)
@@ -522,11 +580,11 @@ class KalmanFilter:
             # if i == len(self.z): break
             difference = ((self.predictedPositionsX[i] - -3.39981724138)**2 + (self.predictedPositionsY[i] - trueY)**2)**0.5
             differences.append(difference)
-        print numpy.mean(differences)
+        # print numpy.mean(differences)
         # print time
         timeArray = numpy.arange(0, 12, 0.1)
-        plt.plot(times, rtkY, label="rtkY")
-        plt.plot(timesAccs, self.predictedPositionsY, label="predictionsY")
+        plt.plot(timesAccs, self.predictedYaw, label="predictionsYaws")
+        # plt.plot(times, rtkY, label="rtkY")
         # plt.plot(timeArray, func(timeArray, *popt), "r", label="Model")
         plt.xlabel("Time/s")
         plt.ylabel("Position/m")
@@ -534,6 +592,16 @@ class KalmanFilter:
 
         # plt.plot(timesAccs, yAccs)
         plt.show()
+
+        # plt.plot(timesAccs, self.predictedPositionsX, label="predictionsY")
+        # plt.plot(times, rtkX, label="rtkX")
+        # # plt.plot(timeArray, func(timeArray, *popt), "r", label="Model")
+        # plt.xlabel("Time/s")
+        # plt.ylabel("Position/m")
+        # plt.legend()
+        #
+        # # plt.plot(timesAccs, yAccs)
+        # plt.show()
 
     def findErrors(self, covariances):
         xError = []
@@ -551,7 +619,69 @@ class KalmanFilter:
 
         return xError, yError
 
-kf = KalmanFilter(0.001, 3, 0.1, 0.1, 0.1)
+
+
+
+
+
+def findBestError():
+    errors = numpy.linspace(0.000001, 1, 20)
+    currentAccAngle = 0
+    bestErrorAngle = 0
+    for i in errors:
+        kf = KalmanFilter(1, 1, 1, 1, 1, i, 1, 1, 1)
+        kf.preSimulationSetup()
+        kf.runSimulation()
+        acc = kf.getAccuracy()
+        print acc
+        if (currentAccAngle == 0 or acc < currentAccAngle):
+            currentAccAngle = acc
+            bestErrorAngle = i
+
+    currentAccRate = 0
+    bestErrorAngleRate = 0
+    for i in errors:
+        kf = KalmanFilter(1, 1, 1, 1, 1, bestErrorAngle, i, 1, 1)
+        kf.preSimulationSetup()
+        kf.runSimulation()
+        acc = kf.getAccuracy()
+        print acc
+        if (currentAccRate == 0 or acc < currentAccRate):
+            currentAccRate = acc
+            bestErrorAngleRate = i
+
+    currentAccRTK = 0
+    bestErrorRTK = 0
+    for i in errors:
+        kf = KalmanFilter(1, 1, 1, 1, 1, bestErrorAngle, bestErrorAngleRate, i, 1)
+        kf.preSimulationSetup()
+        kf.runSimulation()
+        acc = kf.getAccuracy()
+        print acc
+        if (currentAccRTK == 0 or acc < currentAccRTK):
+            currentAccRTK = acc
+            bestErrorRTK = i
+
+    currentAccAcc = 0
+    bestErrorAcc = 0
+    for i in errors:
+        kf = KalmanFilter(1, 1, 1, 1, 1, bestErrorAngle, bestErrorAngleRate, bestErrorRTK, i)
+        kf.preSimulationSetup()
+        kf.runSimulation()
+        acc = kf.getAccuracy()
+        print acc
+        if (currentAccAcc == 0 or acc < currentAccAcc):
+            currentAccAcc = acc
+            bestErrorAcc = i
+
+    return (bestErrorAngle, bestErrorAngleRate, bestErrorRTK, bestErrorAcc)
+
+# errors = findBestError()
+errors = [1.0, 0.001, 0.0001, 0.10526405263157894]
+# (1.0, 9.9999999999999995e-07, 9.9999999999999995e-07, 1.0)
+print errors
+
+kf = KalmanFilter(0.001, 3, 0.1, 0.1, 0.1, *errors)
 kf.preSimulationSetup()
 kf.runSimulation()
 if kf.simMode:
@@ -560,16 +690,18 @@ if kf.simMode:
 else:
     kf.postAnalysis()
     kf.findDifferencesRealData()
+    print "RMS accuracy of predictions is ", kf.getAccuracy(), " m"
+
 
 # predictions = []
 # # accNoises = numpy.arange(0.15, 0.5, 0.02)
-# rtkNoises = numpy.arange(0, 0.1, 0.01)
+# rtkNoises = numpy.arange(0, 0.02, 0.002)
 # # for accNoise in accNoises:
 # for rtkNoise in rtkNoises:
 #     # print "Running for ", accNoise
 #     # kf = KalmanFilter(0.0001, 3, 0.1, accNoise)
 #     print "Running for ", rtkNoise
-#     kf = KalmanFilter(0.0001, 3, 0.1, 0.2, rtkNoise)
+#     kf = KalmanFilter(0.0001, 3, 0.1, 0.2, rtkNoise, *errors)
 #     kf.preSimulationSetup()
 #     kf.runSimulation()
 #     kf.getPredictions()

@@ -61,7 +61,7 @@ def cos(x):
 def sin(x):
     return numpy.sin(x)
 
-def genRandomFlightData(timesteps, gradient, cutoff):
+def genRandomFlightData(timesteps, gradient, cutoff, rtkNoise):
 
     # wind force
     # find acceleration
@@ -128,9 +128,9 @@ def genRandomFlightData(timesteps, gradient, cutoff):
         y = y + y_velocity * timesteps
         z = z + z_velocity * timesteps
         if (i % 10 == 0):
-            xs_noise.append(x + numpy.random.normal(0, 0.01))
-            ys_noise.append(y + numpy.random.normal(0, 0.01))
-            zs_noise.append(z + numpy.random.normal(0, 0.01))
+            xs_noise.append(x + numpy.random.normal(0, rtkNoise))
+            ys_noise.append(y + numpy.random.normal(0, rtkNoise))
+            zs_noise.append(z + numpy.random.normal(0, rtkNoise))
         else:
             xs_noise.append(0)
             ys_noise.append(0)
@@ -191,6 +191,64 @@ def genRandomFlightData(timesteps, gradient, cutoff):
     data = numpy.column_stack((x, y, z, acc_x, acc_y, acc_z, yaw, yaw_dot, roll, roll_dot, pitch, pitch_dot))
     return (data, xs, ys, zs)
 
+def circleSim(times):
+
+    rate = 10 * 2 * numpy.pi / 21.02
+    radius = 0.35
+    def rtkEquation(val, phase):
+        # radius = 0.35
+        x = radius * numpy.sin(rate * val)
+        y = radius * numpy.cos(rate * val - phase)
+        return (x, y)
+
+    def yawEquation(val):
+        gradient = 2 * numpy.pi / 2 * numpy.pi
+        return ((numpy.pi * 2) - val * rate) % (2 * numpy.pi)
+#     times = np.arange(0, 100, timesteps)
+    x = []
+    y = []
+    z = []
+
+    ax = []
+    ay = []
+    az = []
+
+    yaw = []
+    roll = []
+    pitch = []
+
+    yawRate = []
+    rollRate = []
+    pitchRate = []
+
+    xsReal = []
+    ysReal = []
+    zsReal = []
+
+    for i, val in enumerate(times):
+    	if i % 10 == 0:
+            x_pos, y_pos = rtkEquation(val, numpy.pi)
+            x.append(x_pos)
+            y.append(y_pos)
+            yaw.append(yawEquation(val))
+
+        else:
+            x.append(0)
+            y.append(0)
+            yaw.append(0)
+
+        ay.append(rate ** 2 * radius)
+        yawRate.append(-rate)
+        xsReal.append(rtkEquation(val, numpy.pi)[0])
+        ysReal.append(rtkEquation(val, numpy.pi)[1])
+
+    zeros = numpy.zeros(len(x))
+    data = numpy.column_stack((x, y, zeros, zeros, ay, zeros, yaw, yawRate, zeros, zeros, zeros, zeros))
+    return (data, xsReal, ysReal, zsReal)
+
+
+
+
 
     # Wind drift attempt
     # for i in range(len(zs)):
@@ -221,7 +279,6 @@ def genRandomFlightData(timesteps, gradient, cutoff):
 
 # print numpy.shape(genRandomFlightData(0.1))
 # print genRandomFlightData(0.1)[:10]
-
 
 
 
